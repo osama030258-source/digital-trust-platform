@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+.env
+datasets/*
+!datasets/.gitkeep
+ai_models/*.pt
+ai_models/*.onnx
+*.log
+node_modules/
+.DS_Store
