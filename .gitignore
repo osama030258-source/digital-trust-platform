@@ -9,3 +9,6 @@ ai_models/*.onnx
 *.log
 node_modules/
 .DS_Store
+ai_models/*.pt
+ai_models/*.onnx
+ai_models/*.pth
