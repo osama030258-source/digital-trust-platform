@@ -11,3 +11,6 @@ facenet-pytorch
 easyocr
 opencv-python
 pillow
+fastapi
+uvicorn[standard]
+python-multipart
