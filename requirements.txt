@@ -4,3 +4,10 @@ python-dotenv
 pydantic
 sqlalchemy
 psycopg2-binary
+streamlit
+torch
+torchvision
+facenet-pytorch
+easyocr
+opencv-python
+pillow
