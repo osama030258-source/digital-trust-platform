@@ -6,6 +6,14 @@ from backend.app.modules.face_liveness.service import predict_liveness, face_mat
 from backend.app.modules.deepfake.service import predict_deepfake
 from backend.app.modules.document_intel.service import extract_id_fields
 from backend.app.modules.trust_score.service import compute_trust_score
+from backend.app.modules.copilot.service import ask_copilot, generate_investigation_summary
+from backend.app.modules.knowledge_graph.service import (
+    add_verification_event,
+    detect_shared_document,
+    detect_shared_device,
+    get_user_network,
+    get_graph_stats,
+)
 
 router = APIRouter()
 
@@ -92,3 +100,61 @@ async def get_trust_score(
     ocr_result = extract_id_fields(doc_path, models_dict)
 
     return compute_trust_score(liveness_result, face_match_result, deepfake_result, ocr_result)
+from pydantic import BaseModel
+
+
+class VerificationEvent(BaseModel):
+    user_id: str
+    document_id: str
+    device_id: str
+    ip_address: str
+    trust_score: float
+    risk_level: str
+
+
+@router.post("/graph/event")
+def log_verification_event(event: VerificationEvent):
+    result = add_verification_event(
+        event.user_id, event.document_id, event.device_id,
+        event.ip_address, event.trust_score, event.risk_level
+    )
+    return result
+
+
+@router.get("/graph/check-document/{document_id}")
+def check_shared_document(document_id: str):
+    return detect_shared_document(document_id)
+
+
+@router.get("/graph/check-device/{device_id}")
+def check_shared_device(device_id: str):
+    return detect_shared_device(device_id)
+
+
+@router.get("/graph/user/{user_id}")
+def get_user_connections(user_id: str):
+    return get_user_network(user_id)
+
+
+@router.get("/graph/stats")
+def graph_statistics():
+    return get_graph_stats()
+class CopilotQuestion(BaseModel):
+    question: str
+    context_data: dict
+
+
+class SummaryRequest(BaseModel):
+    context_data: dict
+
+
+@router.post("/copilot/ask")
+def copilot_ask(request: CopilotQuestion):
+    result = ask_copilot(request.question, request.context_data)
+    return result
+
+
+@router.post("/copilot/summary")
+def copilot_summary(request: SummaryRequest):
+    result = generate_investigation_summary(request.context_data)
+    return result
