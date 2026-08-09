@@ -1,0 +1,25 @@
+# System Architecture
+
+```mermaid
+flowchart TD
+    A[Streamlit Dashboard<br/>Client Interface] --> B[FastAPI REST API<br/>12 endpoints]
+    B --> C[Face Liveness<br/>Spoof Detection]
+    B --> D[Face Match<br/>Selfie vs ID]
+    B --> E[Deepfake Detection<br/>Video Analysis]
+    B --> F[Document OCR<br/>Field Extraction]
+    C --> G[Trust Scoring Engine<br/>Weighted, Explainable Score]
+    D --> G
+    E --> G
+    F --> G
+    G --> H[Knowledge Graph<br/>Fraud Pattern Detection]
+    G --> I[Identity Copilot<br/>Groq LLM Q&A]
+```
+
+## Data flow
+
+1. A user submits a selfie, ID document, and optionally a short video through the Streamlit dashboard (or directly via the REST API).
+2. The FastAPI backend routes the request to the relevant AI module(s).
+3. Each module (liveness, face match, deepfake, OCR) returns an independent score with reasoning.
+4. The Trust Scoring Engine combines all module outputs into a single weighted score and risk category.
+5. Each verification event can be logged to the Knowledge Graph, which cross-references documents, devices, and IP addresses to detect shared-identity fraud patterns.
+6. An analyst can query the Identity Copilot (Groq LLM) in natural language to get an explanation or investigation summary grounded in the actual verification data.

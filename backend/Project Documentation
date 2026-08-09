@@ -1,0 +1,237 @@
+# Enterprise Identity Verification Platform — Project Documentation
+
+## 1. Project Overview
+
+Ye ek AI-powered Enterprise Identity Verification Platform hai jo KYC (Know Your Customer) verification ko automate karta hai. System multiple AI modules ko combine karke ek unified Trust Score deta hai, saath mein har decision ka explainable reasoning — aur ek Knowledge Graph + LLM-powered Copilot ke through fraud investigation ko support karta hai.
+
+## 2. Technology Stack
+
+| Layer | Technology |
+|---|---|
+| Programming Language | Python 3.12 |
+| Deep Learning Framework | PyTorch, Torchvision |
+| Face Detection & Embedding | facenet-pytorch (MTCNN + InceptionResnetV1, pretrained on VGGFace2) |
+| OCR Engine | EasyOCR |
+| Computer Vision | OpenCV |
+| Model Architecture | ResNet18 (Transfer Learning, ImageNet-pretrained) |
+| Graph Analytics | NetworkX |
+| LLM / Identity Copilot | Groq API (Llama 3.3 70B) |
+| Backend API | FastAPI |
+| Frontend Dashboard | Streamlit |
+| Development Environment | Kaggle Notebooks (GPU T4 x2, training) + VS Code (local deployment) |
+| Version Control | Git / GitHub |
+
+## 3. Datasets Used
+
+### 3.1 Face Liveness / Spoof Detection Dataset
+- **Name:** Real and Fake Face Detection
+- **Source:** CIPLAB, Yonsei University (Kaggle)
+- **Size:** 2,041 images (1,081 real, 960 fake/GAN-manipulated)
+- **Purpose:** Training the liveness/anti-spoofing classifier
+- **Format:** JPG images, organized in `training_real/` and `training_fake/` folders
+
+### 3.2 Face Verification Dataset (Selfie vs ID)
+- **Name:** Selfie & Official ID Photo Dataset (18K images)
+- **Source:** AxonData / Axon Labs (Kaggle)
+- **Content:** Diverse selfie + ID-style photo pairs across ethnicities (South Asia, Middle East, African, Hispanic, Caucasian) and numbered sample sets (selfies + docs)
+- **Purpose:** Testing and validating the face-matching engine (selfie-to-ID verification)
+- **Format:** JPEG images, organized by demographic groups and per-person folders
+
+### 3.3 Deepfake Detection Dataset
+- **Name:** DFDC (Deepfake Detection Challenge) — Sample Subset
+- **Source:** Kaggle Competition (official lightweight sample, ~4GB)
+- **Size:** 400 training videos + metadata.json (labels)
+- **Class distribution:** 77 REAL, 323 FAKE videos (imbalanced, handled via weighted loss)
+- **Purpose:** Training the deepfake/video-manipulation detection model
+- **Format:** MP4 videos with REAL/FAKE labels
+
+### 3.4 Document/OCR Testing Data
+- **Approach:** Synthetic mock ID cards generated programmatically (PIL), plus real-world document images used for live API testing (e.g., a physical ID photograph)
+- **Fields simulated:** Name, Father Name, Date of Birth, ID Number, Gender, Expiry Date, MRZ zone (TD3 format)
+- **Purpose:** Validating the OCR/document field-extraction pipeline
+- **Note:** MRZ (Machine Readable Zone) parsing was evaluated using passporteye but requires high-resolution scans with OCR-B monospace fonts for reliable detection — documented as a supported architecture capability, not live-demoed due to resolution constraints
+- **Known limitation:** Field-to-label mapping uses a Y-coordinate positional heuristic, which can misassign fields on non-standard document layouts — a documented area for future improvement
+
+## 4. Modules Built
+
+### 4.1 Document Intelligence (OCR) Module
+- **Technology:** EasyOCR (pretrained, no custom training required)
+- **Functionality:**
+  - Extracts text from ID document images
+  - Maps detected text to structured fields (Name, DOB, ID Number, etc.) using spatial (Y-coordinate) layout analysis
+  - Confidence-based validation with low-confidence warnings
+  - Outputs structured JSON
+- **Result:** Successfully extracts fields on clear text; correctly flags low-confidence extractions. Field-mapping accuracy varies with document layout — a known limitation for future refinement.
+
+### 4.2 Face-Match Engine
+- **Technology:** facenet-pytorch (MTCNN for face detection, InceptionResnetV1 pretrained on VGGFace2 for embeddings)
+- **Functionality:**
+  - Detects and aligns faces from selfie and ID document images
+  - Generates 512-dimensional face embeddings
+  - Computes cosine similarity between embeddings
+  - Threshold-based match/no-match decision (default threshold: 0.6)
+- **Key engineering fix:** Added EXIF orientation correction (`ImageOps.exif_transpose`) to handle phone-camera rotation metadata that was causing face-detection failures
+
+### 4.3 Face Liveness / Spoof Detection Module
+- **Technology:** ResNet18 (transfer learning, fine-tuned on layer4 + custom classification head)
+- **Training approach:**
+  - Initial run: frozen backbone, only final layer trained → 63–66% val accuracy
+  - Improved run: unfroze layer4, added data augmentation (horizontal flip, rotation), 10 epochs → 70.66% best validation accuracy
+- **Result:** Best model checkpoint saved (`liveness_model_best.pth`); verified working via live API testing with high-confidence predictions (e.g., 99.7%+ on real samples)
+- **Known limitation:** Overfitting observed on the small dataset (2,041 images); documented as a baseline suitable for demonstration, with production deployment recommended to use larger datasets (e.g., CelebA-Spoof) for improved generalization
+
+### 4.4 Deepfake Detection Module
+- **Technology:** ResNet18 (transfer learning, same fine-tuning approach as liveness model), frame-based video analysis
+- **Pipeline:**
+  1. Extract N evenly-spaced frames per video (OpenCV)
+  2. Crop and align faces from each frame (MTCNN)
+  3. Classify each face-frame as real/fake (ResNet18)
+  4. Aggregate frame-level predictions into a video-level verdict (average probability)
+- **Class imbalance handling:** Weighted CrossEntropyLoss (based on inverse class frequency) to address the 1:4 REAL:FAKE ratio in training data
+- **Result:** Verified working end-to-end via live API testing (e.g., 99.98% fake-confidence correctly flagged on a known fake sample)
+
+### 4.5 Trust Scoring Engine (with Explainable AI)
+- **Approach:** Rule-based weighted aggregation of all module outputs
+
+| Component | Weight |
+|---|---|
+| Face Liveness | 25% |
+| Face-Match | 30% |
+| Deepfake Detection | 30% |
+| Document OCR Confidence | 15% |
+
+- **Explainability:** Each component returns a human-readable reasoning string alongside its numeric score
+- **Risk categorization:**
+
+| Score Range | Category |
+|---|---|
+| 80–100 | HIGH TRUST |
+| 60–79 | MEDIUM TRUST |
+| 40–59 | LOW TRUST |
+| 0–39 | REJECT |
+
+- **Result:** End-to-end tested pipeline returning a final trust score with full per-module breakdown and reasoning, verified via `/trust-score` API endpoint
+
+### 4.6 Identity Knowledge Graph
+- **Technology:** NetworkX (in-memory graph)
+- **Functionality:**
+  - Tracks relationships between Users, Documents, Devices, and IP Addresses across verification events
+  - Detects shared-document fraud patterns (same document used by multiple users)
+  - Detects shared-device fraud patterns (multiple identities verified from the same device)
+  - Provides per-user network view (all connected entities and their verification history)
+  - Provides overall graph statistics (node/edge counts by type)
+- **Result:** Verified working via live API testing — successfully detected a simulated shared-document fraud scenario (`"risk": "HIGH — shared document detected"`) when the same document ID was linked to two different user IDs
+- **Known limitation:** Currently in-memory (data resets on server restart); a production deployment would persist this to Neo4j or a similar graph database
+
+### 4.7 AI Identity Copilot
+- **Technology:** Groq API (Llama 3.3 70B Versatile)
+- **Functionality:**
+  - Accepts a free-text analyst question plus verification context data (trust score, module breakdown, etc.)
+  - Returns a natural-language explanation grounded strictly in the provided data
+  - Separate endpoint auto-generates a concise investigation summary (trust assessment, key risk factors, recommended action) without requiring a specific question
+- **Result:** Verified working via live API testing — correctly explained a LOW TRUST verification result by referencing the specific weak components (Face Match, Deepfake Check) from the supplied breakdown
+
+### 4.8 REST API Layer
+- **Technology:** FastAPI
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| GET | `/` | Health check (root) |
+| GET | `/health` | Health check |
+| POST | `/api/verify/liveness` | Face liveness check |
+| POST | `/api/verify/face-match` | Selfie vs ID face matching |
+| POST | `/api/verify/deepfake` | Video deepfake detection |
+| POST | `/api/verify/document-ocr` | Document field extraction |
+| POST | `/trust-score` | Unified verification (all modules combined) |
+| POST | `/api/graph/event` | Log a verification event to the Knowledge Graph |
+| GET | `/api/graph/check-document/{document_id}` | Check for shared-document fraud |
+| GET | `/api/graph/check-device/{device_id}` | Check for shared-device fraud |
+| GET | `/api/graph/user/{user_id}` | Get a user's connection network |
+| GET | `/api/graph/stats` | Overall graph statistics |
+| POST | `/api/copilot/ask` | Ask the Identity Copilot a question about a verification result |
+| POST | `/api/copilot/summary` | Generate an automatic investigation summary |
+
+- **Testing:** All endpoints validated interactively via the FastAPI Swagger UI (`/docs`) with real file uploads (selfie, document, video) and real JSON payloads; confirmed HTTP 200 responses with correct, well-formed JSON output
+
+### 4.9 Executive Dashboard
+- **Technology:** Streamlit
+- **Features:**
+  - File upload widgets (selfie, ID document, optional video)
+  - Real-time trust score display with color-coded risk category
+  - Per-module explainability breakdown with progress bars and reasoning text
+  - Uploaded image preview panel
+- **Deployment:** Standalone script (`frontend/dashboard.py`), runnable via `streamlit run frontend/dashboard.py` from the project root, loading model checkpoints from `ai_models/`
+
+## 5. Key Engineering Challenges & Solutions
+
+| Challenge | Solution |
+|---|---|
+| Dataset detachment on Kaggle session restart | Re-attach dataset via "Add Input"; verify with `os.walk()` after every restart |
+| Internet access disabled by default on Kaggle | Enabled via Settings → Turn on internet (requires session to be stopped first, and phone-verified account) |
+| Face detection failing on rotated phone photos | Applied `ImageOps.exif_transpose()` to correct EXIF orientation before face detection |
+| Class imbalance in deepfake dataset (1:4 REAL:FAKE) | Weighted CrossEntropyLoss based on inverse class frequency |
+| Overfitting on small liveness dataset | Fine-tuned only layer4 + classifier head (not full network); added data augmentation |
+| Python 3.14 venv incompatible with pydantic-core | Rebuilt venv using Python 3.12 for stable FastAPI/Pydantic installation |
+| Duplicate/stray model files in `frontend/` risking accidental git commit | Removed duplicates; strengthened `.gitignore` with global `*.pth` pattern |
+| No suitable OCR training dataset with real text/MRZ found on Kaggle | Generated synthetic mock ID cards programmatically to validate the OCR pipeline, avoiding real PII/privacy concerns |
+| torch/numpy version conflicts after installing facenet-pytorch | Verified as non-blocking dependency warnings; did not affect functionality |
+| Docker build stalling on large `torch` wheel download | Identified as a slow/unstable internet connection issue during the ~500MB CUDA-enabled torch download; deferred to a stable-connection session, with CPU-only torch identified as a future size/speed optimization |
+
+## 6. Evaluation Summary (Self-Assessed Results)
+
+| Module | Metric | Result |
+|---|---|---|
+| Face Liveness Detection | Validation Accuracy | 70.66% |
+| Face-Match Engine | Verified via live API testing | Working (threshold-based decision) |
+| Deepfake Detection | Verified via live API testing | Working (frame-aggregated confidence) |
+| Document OCR | Field Extraction | Working (accuracy varies by layout) |
+| Knowledge Graph | Fraud Pattern Detection | Verified — shared-document scenario correctly flagged |
+| Identity Copilot | Contextual Q&A | Verified — grounded explanation generated from real data |
+| Trust Score Pipeline | End-to-end integration | Fully functional, tested via API |
+
+*Note: Training-time metrics (validation accuracy, precision/recall) were produced during Kaggle GPU training sessions. All module-level functional results were independently verified via live REST API testing during development.*
+
+## 7. Project Folder Structure
+
+```
+digital-trust-platform/
+├── backend/
+│   ├── Dockerfile
+│   └── app/
+│       ├── main.py
+│       ├── modules/
+│       │   ├── face_liveness/
+│       │   ├── deepfake/
+│       │   ├── document_intel/
+│       │   ├── trust_score/
+│       │   ├── knowledge_graph/
+│       │   └── copilot/
+│       ├── core/
+│       │   └── model_loader.py
+│       └── api/
+│           └── routes.py
+├── ai_models/
+│   ├── liveness_model_best.pth
+│   └── deepfake_model_best.pth
+├── datasets/
+├── frontend/
+│   └── dashboard.py
+├── docs/
+│   └── architecture/
+├── docker-compose.yml
+├── .dockerignore
+├── .gitignore
+├── requirements.txt
+├── README.md
+└── .env.example
+```
+
+## 8. Bonus/Future Enhancements (Not Yet Implemented)
+
+- MRZ parsing with production-scale scan resolution
+- Persistent Knowledge Graph backend (Neo4j) for cross-session fraud tracking
+- Continuous authentication / behavioral biometrics
+- Federated learning for privacy-preserving model updates
+- Cross-border identity verification support
+- Docker containerized deployment (in progress — build pending stable internet connection)
+- Voice Authentication Engine (scoped out of MVP)

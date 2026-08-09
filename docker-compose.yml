@@ -1,0 +1,13 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: digital-trust-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./ai_models:/app/ai_models
+    env_file:
+      - .env
+    restart: unless-stopped

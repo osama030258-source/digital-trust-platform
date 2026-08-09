@@ -1,0 +1,8 @@
+venv/
+__pycache__/
+*.pyc
+datasets/
+.git/
+.env
+*.pth
+.kaggle/
